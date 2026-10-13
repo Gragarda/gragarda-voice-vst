@@ -40,7 +40,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # Modele DeepFilterNet + licences dans le bundle : Gragarda Voice.vst3/Contents/Resources
-set(VST3_BUNDLE "$<TARGET_PROPERTY:GragardaVoice_VST3,JUCE_PLUGIN_ARTEFACT_FILE>")
+set(VST3_BUNDLE "$<GENEX_EVAL:$<TARGET_PROPERTY:GragardaVoice_VST3,JUCE_PLUGIN_ARTEFACT_FILE>>")
 add_custom_command(TARGET GragardaVoice_VST3 POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory "${VST3_BUNDLE}/Contents/Resources"
   COMMAND ${CMAKE_COMMAND} -E copy "${DFN_MODEL}" "${VST3_BUNDLE}/Contents/Resources/"
