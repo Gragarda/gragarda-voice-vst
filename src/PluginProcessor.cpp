@@ -1,5 +1,5 @@
 // Gragarda Voice en VST3 : enveloppe JUCE autour du coeur DSP (core/dsp).
-// Interface : bouton de calibration + editeur generique (4 macros, destination, debruitage, moteur, gain, avant/apres).
+// Interface : bouton de calibration + controles traduits (4 macros, destination, debruitage, moteur, gain, avant/apres).
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "BinaryData.h"
@@ -379,7 +379,7 @@ private:
 class GragardaVoiceEditor : public juce::AudioProcessorEditor, private juce::Timer {
 public:
     explicit GragardaVoiceEditor(GragardaVoiceProcessor& p)
-        : AudioProcessorEditor(p), p_(p), settings_(userSettings()), T(settings_->getValue("language")), generic_(p)
+        : AudioProcessorEditor(p), p_(p), settings_(userSettings()), T(settings_->getValue("language"))
     {
         // Langue : l'hote ne la transmet pas, choix manuel (Auto = langue du systeme)
         language_.addItem("Auto", 1);
@@ -398,6 +398,29 @@ public:
             panel_.reset();
             retranslate();
         };
+        // Controles maison plutot que l'editeur generique : les noms de parametres (hote, automation) restent
+        // en anglais et stables, les libelles affiches suivent la langue choisie
+        auto& st = p.state;
+        for (int i = 0; i < 5; ++i) {
+            sliders_[i].setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 22);
+            sAtt_[i] = std::make_unique<APVTS::SliderAttachment>(st, kSliders[i], sliders_[i]);
+        }
+        sliders_[4].setTextValueSuffix(" dB");
+        // items crees avant les attachments (ComboBox ignore un texte vide) ; retranslate() les renomme
+        dest_.addItemList({T("DestStream"), T("DestPodcast"), T("DestVoiceOver")}, 1);
+        engine_.addItemList({T("EngineFast"), T("EngineMax")}, 1);
+        destAtt_ = std::make_unique<APVTS::ComboBoxAttachment>(st, "dest", dest_);
+        engineAtt_ = std::make_unique<APVTS::ComboBoxAttachment>(st, "engine", engine_);
+        denoiseAtt_ = std::make_unique<APVTS::ButtonAttachment>(st, "denoise", denoise_);
+        bypass_.setClickingTogglesState(true);
+        bypass_.setColour(juce::TextButton::buttonOnColourId, juce::Colours::darkorange);
+        addAndMakeVisible(bypass_);
+        bypassAtt_ = std::make_unique<APVTS::ButtonAttachment>(st, "bypass", bypass_);
+        for (int i = 0; i < kRows; ++i) {
+            labels_[i].setMinimumHorizontalScale(0.7f);
+            addAndMakeVisible(labels_[i]);
+            addAndMakeVisible(*rows()[i]);
+        }
         calibrate_.onClick = [this] { openCalibration(); };
         kofi_.setURL(juce::URL("https://ko-fi.com/gragarda"));
         retranslate();
@@ -405,9 +428,8 @@ public:
         addAndMakeVisible(calibrate_);
         addAndMakeVisible(latency_);
         addAndMakeVisible(kofi_);
-        addAndMakeVisible(generic_);
         setResizable(true, false);
-        setSize(640, 40 + generic_.getHeight() + 32);
+        setSize(640, 40 + kRows * kRowH + 12 + 32);
         startTimerHz(4);
         timerCallback();
     }
@@ -418,11 +440,18 @@ public:
         auto top = r.removeFromTop(40).reduced(6);
         calibrate_.setBounds(top.removeFromLeft(240));
         top.removeFromLeft(10);
+        bypass_.setBounds(top.removeFromRight(80));
+        top.removeFromRight(10);
         language_.setBounds(top.removeFromRight(170));
         top.removeFromRight(10);
         latency_.setBounds(top);
         kofi_.setBounds(r.removeFromBottom(32));
-        generic_.setBounds(r);
+        r.reduce(12, 6);
+        for (int i = 0; i < kRows; ++i) {
+            auto row = r.removeFromTop(kRowH).reduced(0, 3);
+            labels_[i].setBounds(row.removeFromLeft(170));
+            rows()[i]->setBounds(row);
+        }
         if (panel_)
             panel_->setBounds(getLocalBounds());
     }
@@ -431,15 +460,45 @@ private:
     GragardaVoiceProcessor& p_;
     std::unique_ptr<juce::PropertiesFile> settings_;
     Strings T;
-    juce::GenericAudioProcessorEditor generic_;
+    using APVTS = juce::AudioProcessorValueTreeState;
+    static constexpr int kRows = 8, kRowH = 32;
+    static constexpr const char* kSliders[5] = {"clean", "warmth", "clarity", "punch", "gain"};
+    // cle de traduction du libelle de chaque ligne, dans l'ordre de rows()
+    static constexpr const char* kLabels[kRows] = {"Clean", "Warmth", "Clarity", "Punch", "Destination",
+                                                   "Denoise", "Engine", "Gain"};
+    juce::TooltipWindow tips_{this};
+    juce::Slider sliders_[5];
+    juce::ComboBox dest_, engine_;
+    juce::ToggleButton denoise_;
+    juce::TextButton bypass_{"Bypass"};
+    juce::Label labels_[kRows];
+    std::unique_ptr<APVTS::SliderAttachment> sAtt_[5];
+    std::unique_ptr<APVTS::ComboBoxAttachment> destAtt_, engineAtt_;
+    std::unique_ptr<APVTS::ButtonAttachment> denoiseAtt_, bypassAtt_;
     juce::ComboBox language_;
     juce::TextButton calibrate_;
     juce::Label latency_;
     juce::HyperlinkButton kofi_;
     std::unique_ptr<CalibrationPanel> panel_;
 
+    std::array<juce::Component*, kRows> rows()
+    {
+        return {&sliders_[0], &sliders_[1], &sliders_[2], &sliders_[3], &dest_, &denoise_, &engine_, &sliders_[4]};
+    }
+
     void retranslate()
     {
+        for (int i = 0; i < kRows; ++i)
+            labels_[i].setText(T(kLabels[i]), juce::dontSendNotification);
+        // bouton court "Bypass", explication traduite en infobulle
+        bypass_.setTooltip(T("Bypass"));
+        for (int i = 0; i < 4; ++i)
+            sliders_[i].setTooltip(T((juce::String(kLabels[i]) + "Tip").toRawUTF8()));
+        const char* dests[] = {"DestStream", "DestPodcast", "DestVoiceOver"};
+        for (int i = 0; i < 3; ++i)
+            dest_.changeItemText(i + 1, T(dests[i]));
+        engine_.changeItemText(1, T("EngineFast"));
+        engine_.changeItemText(2, T("EngineMax"));
         calibrate_.setButtonText(T("Calibrate"));
         kofi_.setButtonText(T("SupportKofi"));
         timerCallback();
