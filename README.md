@@ -25,6 +25,9 @@ Then rescan plugins in your host.
 - Fixed latency, reported to the host (compensated automatically in DAWs): Max quality 41.5 ms, Fast 21.5 ms.
   In live tools (Wave Link, Voicemeeter) add the same delay to your video if lip sync matters.
 - The noise removers are trained at 48 kHz: use a 48 kHz project/device for best results.
+- Calibration: the "Run calibration" button records 5 s of silence then 15 s of reading (the track/input must be
+  receiving audio), shows 4 status lights and suggests gain, macros and a hidden mic correction (saved with the project).
+- Language: the host does not pass its language; pick one in the list at the top right (Auto = system language).
 - Before/after: plays the raw signal, delayed and level matched, for an honest comparison.
 
 ## Build
