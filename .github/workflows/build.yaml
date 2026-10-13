@@ -1,0 +1,66 @@
+name: Build
+on: [push, pull_request, workflow_dispatch]
+env:
+  DFN_COMMIT: d375b2d
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            name: windows-x64
+          - os: macos-26
+            name: macos-universal
+          - os: ubuntu-24.04
+            name: linux-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Dependances Linux (JUCE)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libasound2-dev libjack-jackd2-dev libfreetype-dev libfontconfig1-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev \
+            libgl1-mesa-dev
+
+      - name: DeepFilterNet (libDF)
+        shell: bash
+        run: |
+          git clone https://github.com/Rikorose/DeepFilterNet.git ../DeepFilterNet
+          cd ../DeepFilterNet && git checkout $DFN_COMMIT
+          if [ "$RUNNER_OS" = macOS ]; then
+            rustup target add aarch64-apple-darwin x86_64-apple-darwin
+            for t in aarch64-apple-darwin x86_64-apple-darwin; do
+              MACOSX_DEPLOYMENT_TARGET=12.0 cargo build --release -p deep_filter --no-default-features \
+                --features capi --lib --target $t
+            done
+            mkdir -p target/release
+            lipo -create target/aarch64-apple-darwin/release/libdf.a target/x86_64-apple-darwin/release/libdf.a \
+              -output target/release/libdf.a
+          else
+            cargo build --release -p deep_filter --no-default-features --features capi --lib
+          fi
+
+      - name: Build + tests du coeur
+        shell: bash
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGV_CORE_TESTS=ON
+          cmake --build build --config Release --parallel
+          ctest --test-dir build -C Release --output-on-failure
+
+      - name: Paquet
+        shell: bash
+        run: |
+          B=$(find build -type d -name "Gragarda Voice.vst3" -path "*VST3*" | head -1)
+          mkdir pkg && cp -R "$B" pkg/
+          cd pkg && cmake -E tar cf ../gragarda-voice-vst-${{ matrix.name }}.zip --format=zip "Gragarda Voice.vst3"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gragarda-voice-vst-${{ matrix.name }}
+          path: gragarda-voice-vst-${{ matrix.name }}.zip
