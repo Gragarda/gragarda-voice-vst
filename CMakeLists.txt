@@ -30,9 +30,12 @@ juce_add_plugin(GragardaVoice
   NEEDS_MIDI_INPUT FALSE)
 
 target_sources(GragardaVoice PRIVATE src/PluginProcessor.cpp)
+# Traductions : copie des .ini du filtre OBS (data/locale de gragarda-voice), embarquees
+file(GLOB LOCALES locale/*.ini)
+juce_add_binary_data(GVLocales SOURCES ${LOCALES})
 target_compile_definitions(GragardaVoice PUBLIC
   JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0 JUCE_DISPLAY_SPLASH_SCREEN=0)
-target_link_libraries(GragardaVoice PRIVATE gv_dsp juce::juce_audio_utils
+target_link_libraries(GragardaVoice PRIVATE gv_dsp GVLocales juce::juce_audio_utils
   PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 if(UNIX AND NOT APPLE)
   # symboles rnnoise_* / df_* non exportes (conflit avec un autre plugin qui embarque RNNoise)
