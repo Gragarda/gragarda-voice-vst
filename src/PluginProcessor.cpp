@@ -156,6 +156,7 @@ public:
         auto st = state.copyState();
         for (int i = 0; i < 3; ++i)
             st.setProperty(kCorrIds[i], corr_[i].load(), nullptr);
+        st.setProperty("rt60", rt60_.load(), nullptr);
         if (auto xml = st.createXml())
             copyXmlToBinary(*xml, dest);
     }
@@ -165,6 +166,7 @@ public:
             auto st = juce::ValueTree::fromXml(*xml);
             for (int i = 0; i < 3; ++i)
                 corr_[i] = (float)st.getProperty(kCorrIds[i], 0.0f);
+            rt60_ = (float)st.getProperty("rt60", 0.0f);
             corrDirty_ = true;
             state.replaceState(st);
         }
@@ -185,6 +187,7 @@ public:
         corr_[0] = r.corrLow;
         corr_[1] = r.corrPresence;
         corr_[2] = r.corrAir;
+        rt60_ = r.dereverbRt60;
         corrDirty_ = true;
     }
 
@@ -199,6 +202,7 @@ private:
     VoiceChain chain_;
     double sampleRate_ = 48000.0;
     std::atomic<float> corr_[3] = {0.0f, 0.0f, 0.0f}; // correction micro posee par la calibration, dB
+    std::atomic<float> rt60_{0.0f}; // de-reverb pose par la calibration, s ; 0 = hors service
     std::atomic<bool> corrDirty_{true};
     struct Snapshot {
         float clean = -1, warmth = -1, clarity = -1, punch = -1, gain = 0;
@@ -232,6 +236,7 @@ private:
             m.corrLow = corr_[0];
             m.corrPresence = corr_[1];
             m.corrAir = corr_[2];
+            m.rt60 = rt60_;
             chain_.setMacros(m);
         }
         if (force || s.gain != last_.gain)
@@ -352,17 +357,23 @@ private:
             buttons("CalibRetry", [this] { record(Noise); }, "CalibCancel", [this] { onClose_(); });
             return;
         }
-        auto light = [this](Light l, const char* name, const char* g, const char* o, const char* rd) {
+        auto line = [this](Light l, const char* name, const juce::String& msg) {
             const juce::String dot = l == Light::Green ? juce::CharPointer_UTF8("\xf0\x9f\x9f\xa2")
                                    : l == Light::Orange ? juce::CharPointer_UTF8("\xf0\x9f\x9f\xa0")
                                                         : juce::CharPointer_UTF8("\xf0\x9f\x94\xb4");
-            return dot + "  " + T(name) + " : " + T(l == Light::Green ? g : l == Light::Orange ? o : rd) + "\n";
+            return dot + "  " + T(name) + " : " + msg + "\n";
+        };
+        auto light = [&](Light l, const char* name, const char* g, const char* o, const char* rd) {
+            return line(l, name, T(l == Light::Green ? g : l == Light::Orange ? o : rd));
         };
         juce::String s = T("CalibDone") + "\n\n";
         s << light(r.noise, "LightNoise", "NoiseG", "NoiseO", "NoiseR")
           << light(r.level, "LightLevel", "LevelG", "LevelO", "LevelR")
           << light(r.sibilance, "LightSib", "SibG", "SibO", "SibR")
           << light(r.clipping, "LightClip", "ClipG", "ClipO", "ClipR")
+          << line(r.reverb, "LightReverb", r.rt60 <= 0 ? T("ReverbNA")
+                                          : T(r.dereverbRt60 > 0 ? "ReverbOn" : "ReverbOff")
+                                                .replace("%1", juce::String(r.rt60, 2)))
           << "\n" << T("CalibProposal") << "\n"
           << T("Gain") << " : " << juce::String(r.gainDb, 1) << " dB\n"
           << T("Clean") << " : " << r.clean << "\n"
