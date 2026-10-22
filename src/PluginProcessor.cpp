@@ -7,6 +7,14 @@
 #include "VoiceChain.h"
 
 namespace {
+// Options avancees : un interrupteur par etage (parametres de l'hote : sauvegardes avec le projet)
+struct Stage { const char *id, *name, *label; };
+constexpr Stage kStages[] = {
+    {"st_hpf", "High-pass on", "StageHpf"},          {"st_dereverb", "De-reverb on", "StageDereverb"},
+    {"st_eq", "EQ on", "StageEq"},                    {"st_compressor", "Compressor on", "StageCompressor"},
+    {"st_deesser", "De-esser on", "StageDeesser"},    {"st_leveler", "Leveler on", "StageLeveler"},
+    {"st_limiter", "Limiter on", "StageLimiter"}};
+
 juce::AudioProcessorValueTreeState::ParameterLayout layout()
 {
     using namespace juce;
@@ -23,6 +31,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout layout()
     l.add(std::make_unique<AudioParameterFloat>(ParameterID{"gain", 1}, "Input gain",
         NormalisableRange<float>(-24.0f, 24.0f, 0.1f), 0.0f, AudioParameterFloatAttributes().withLabel("dB")));
     l.add(std::make_unique<AudioParameterBool>(ParameterID{"bypass", 1}, "Before/after (level matched)", false));
+    for (const auto& s : kStages)
+        l.add(std::make_unique<AudioParameterBool>(ParameterID{s.id, 1}, s.name, true));
     return l;
 }
 
@@ -206,7 +216,7 @@ private:
     std::atomic<bool> corrDirty_{true};
     struct Snapshot {
         float clean = -1, warmth = -1, clarity = -1, punch = -1, gain = 0;
-        int dest = -1, engine = -1;
+        int dest = -1, engine = -1, stages = -1; // stages : un bit par interrupteur
         bool macrosDiffer(const Snapshot& o) const
         {
             return clean != o.clean || warmth != o.warmth || clarity != o.clarity || punch != o.punch || dest != o.dest;
@@ -226,6 +236,16 @@ private:
         s.dest = (int)raw("dest");
         s.engine = (int)raw("engine");
         s.gain = raw("gain");
+        s.stages = 0;
+        for (int i = 0; i < (int)std::size(kStages); ++i)
+            s.stages |= (raw(kStages[i].id) > 0.5f) << i;
+        if (force || s.stages != last_.stages) { // setStages recalcule les filtres : seulement si ca change
+            VoiceChain::Stages on;
+            bool* b[] = {&on.hpf, &on.dereverb, &on.eq, &on.compressor, &on.deesser, &on.leveler, &on.limiter};
+            for (int i = 0; i < (int)std::size(kStages); ++i)
+                *b[i] = (s.stages >> i) & 1;
+            chain_.setStages(on);
+        }
         if (force || s.macrosDiffer(last_) || corrDirty_.exchange(false)) {
             VoiceChain::Macros m;
             m.clean = s.clean;
@@ -387,6 +407,39 @@ private:
     }
 };
 
+// Options avancees : une case par etage, branchee sur les parametres st_*
+class AdvancedPanel : public juce::Component {
+public:
+    AdvancedPanel(juce::AudioProcessorValueTreeState& st, const Strings& T, std::function<void()> onClose)
+    {
+        intro_.setText(T("AdvancedIntro"), juce::dontSendNotification);
+        addAndMakeVisible(intro_);
+        for (int i = 0; i < (int)std::size(kStages); ++i) {
+            boxes_[i].setButtonText(T(kStages[i].label));
+            att_[i] = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(st, kStages[i].id, boxes_[i]);
+            addAndMakeVisible(boxes_[i]);
+        }
+        close_.setButtonText(T("AdvancedClose"));
+        close_.onClick = std::move(onClose);
+        addAndMakeVisible(close_);
+    }
+    void paint(juce::Graphics& g) override { g.fillAll(getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId)); }
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced(12);
+        close_.setBounds(r.removeFromBottom(32).removeFromRight(140));
+        intro_.setBounds(r.removeFromTop(48));
+        for (auto& b : boxes_)
+            b.setBounds(r.removeFromTop(30));
+    }
+
+private:
+    juce::Label intro_;
+    juce::ToggleButton boxes_[std::size(kStages)];
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> att_[std::size(kStages)];
+    juce::TextButton close_;
+};
+
 class GragardaVoiceEditor : public juce::AudioProcessorEditor, private juce::Timer {
 public:
     explicit GragardaVoiceEditor(GragardaVoiceProcessor& p)
@@ -407,6 +460,7 @@ public:
             settings_->saveIfNeeded();
             T = Strings(settings_->getValue("language"));
             panel_.reset();
+            advancedPanel_.reset();
             retranslate();
         };
         // Controles maison plutot que l'editeur generique : les noms de parametres (hote, automation) restent
@@ -433,6 +487,8 @@ public:
             addAndMakeVisible(*rows()[i]);
         }
         calibrate_.onClick = [this] { openCalibration(); };
+        advanced_.onClick = [this] { openAdvanced(); };
+        addAndMakeVisible(advanced_);
         kofi_.setURL(juce::URL("https://ko-fi.com/gragarda"));
         retranslate();
         addAndMakeVisible(language_);
@@ -456,7 +512,9 @@ public:
         language_.setBounds(top.removeFromRight(170));
         top.removeFromRight(10);
         latency_.setBounds(top);
-        kofi_.setBounds(r.removeFromBottom(32));
+        auto bottom = r.removeFromBottom(32);
+        advanced_.setBounds(bottom.removeFromRight(220).reduced(6, 3));
+        kofi_.setBounds(bottom);
         r.reduce(12, 6);
         for (int i = 0; i < kRows; ++i) {
             auto row = r.removeFromTop(kRowH).reduced(0, 3);
@@ -465,6 +523,8 @@ public:
         }
         if (panel_)
             panel_->setBounds(getLocalBounds());
+        if (advancedPanel_)
+            advancedPanel_->setBounds(getLocalBounds());
     }
 
 private:
@@ -491,6 +551,8 @@ private:
     juce::Label latency_;
     juce::HyperlinkButton kofi_;
     std::unique_ptr<CalibrationPanel> panel_;
+    juce::TextButton advanced_;
+    std::unique_ptr<AdvancedPanel> advancedPanel_;
 
     std::array<juce::Component*, kRows> rows()
     {
@@ -511,6 +573,7 @@ private:
         engine_.changeItemText(1, T("EngineFast"));
         engine_.changeItemText(2, T("EngineMax"));
         calibrate_.setButtonText(T("Calibrate"));
+        advanced_.setButtonText(T("Advanced"));
         kofi_.setButtonText(T("SupportKofi"));
         timerCallback();
     }
@@ -519,6 +582,19 @@ private:
     {
         latency_.setText(T("LatencyInfo") + " " + juce::String(juce::roundToInt(p_.latencyMs())) + " ms",
                          juce::dontSendNotification);
+    }
+
+    void openAdvanced()
+    {
+        juce::Component::SafePointer<GragardaVoiceEditor> self(this);
+        advancedPanel_ = std::make_unique<AdvancedPanel>(p_.state, T, [self] {
+            juce::MessageManager::callAsync([self] {
+                if (self)
+                    self->advancedPanel_.reset();
+            });
+        });
+        addAndMakeVisible(*advancedPanel_);
+        resized();
     }
 
     void openCalibration()
