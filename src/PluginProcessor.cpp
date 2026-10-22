@@ -10,10 +10,12 @@ namespace {
 // Options avancees : un interrupteur par etage (parametres de l'hote : sauvegardes avec le projet)
 struct Stage { const char *id, *name, *label; };
 constexpr Stage kStages[] = {
-    {"st_hpf", "High-pass on", "StageHpf"},          {"st_dereverb", "De-reverb on", "StageDereverb"},
+    {"st_hpf", "High-pass on", "StageHpf"},
     {"st_eq", "EQ on", "StageEq"},                    {"st_compressor", "Compressor on", "StageCompressor"},
     {"st_deesser", "De-esser on", "StageDeesser"},    {"st_leveler", "Leveler on", "StageLeveler"},
     {"st_limiter", "Limiter on", "StageLimiter"}};
+
+constexpr float kModeRt60[] = {0.0f, 0.0f, 0.4f, 0.7f, 1.0f}; // Auto, Coupe, Leger, Moyen, Fort
 
 juce::AudioProcessorValueTreeState::ParameterLayout layout()
 {
@@ -33,6 +35,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout layout()
     l.add(std::make_unique<AudioParameterBool>(ParameterID{"bypass", 1}, "Before/after (level matched)", false));
     for (const auto& s : kStages)
         l.add(std::make_unique<AudioParameterBool>(ParameterID{s.id, 1}, s.name, true));
+    // De-reverb : Auto = RT60 pose par la calibration, sinon force a la main (kModeRt60)
+    l.add(std::make_unique<AudioParameterChoice>(ParameterID{"dereverb_mode", 1}, "De-reverb",
+        StringArray{"Auto (calibration)", "Off", "Light", "Medium", "Strong"}, 0));
     return l;
 }
 
@@ -216,10 +221,11 @@ private:
     std::atomic<bool> corrDirty_{true};
     struct Snapshot {
         float clean = -1, warmth = -1, clarity = -1, punch = -1, gain = 0;
-        int dest = -1, engine = -1, stages = -1; // stages : un bit par interrupteur
+        int dest = -1, engine = -1, stages = -1, drMode = -1; // stages : un bit par interrupteur
         bool macrosDiffer(const Snapshot& o) const
         {
-            return clean != o.clean || warmth != o.warmth || clarity != o.clarity || punch != o.punch || dest != o.dest;
+            return clean != o.clean || warmth != o.warmth || clarity != o.clarity || punch != o.punch || dest != o.dest
+                || drMode != o.drMode;
         }
     } last_;
 
@@ -236,13 +242,14 @@ private:
         s.dest = (int)raw("dest");
         s.engine = (int)raw("engine");
         s.gain = raw("gain");
-        s.stages = 0;
+        s.drMode = juce::jlimit(0, 4, (int)raw("dereverb_mode"));
+        s.stages = s.drMode != 1; // bit 0 : de-reverb
         for (int i = 0; i < (int)std::size(kStages); ++i)
-            s.stages |= (raw(kStages[i].id) > 0.5f) << i;
+            s.stages |= (raw(kStages[i].id) > 0.5f) << (i + 1);
         if (force || s.stages != last_.stages) { // setStages recalcule les filtres : seulement si ca change
             VoiceChain::Stages on;
-            bool* b[] = {&on.hpf, &on.dereverb, &on.eq, &on.compressor, &on.deesser, &on.leveler, &on.limiter};
-            for (int i = 0; i < (int)std::size(kStages); ++i)
+            bool* b[] = {&on.dereverb, &on.hpf, &on.eq, &on.compressor, &on.deesser, &on.leveler, &on.limiter};
+            for (int i = 0; i <= (int)std::size(kStages); ++i)
                 *b[i] = (s.stages >> i) & 1;
             chain_.setStages(on);
         }
@@ -256,15 +263,16 @@ private:
             m.corrLow = corr_[0];
             m.corrPresence = corr_[1];
             m.corrAir = corr_[2];
-            m.rt60 = rt60_;
+            m.rt60 = s.drMode == 0 ? rt60_.load() : kModeRt60[s.drMode];
             chain_.setMacros(m);
         }
         if (force || s.gain != last_.gain)
             chain_.setGainDb(s.gain);
-        if (force || s.engine != last_.engine) {
+        if (force || s.engine != last_.engine)
             chain_.setEngine(s.engine == 1 && chain_.maxAvailable() ? VoiceChain::Max : VoiceChain::Fast);
-            setLatencySamples(chain_.latencySamples()); // latence fixe par moteur, compensee par l'hote
-        }
+        // latence = moteur + de-reverb s'il tourne ; compensee par l'hote, signalee seulement si elle change
+        if (chain_.latencySamples() != getLatencySamples())
+            setLatencySamples(chain_.latencySamples());
         chain_.setDenoise(raw("denoise") > 0.5f);
         chain_.setBypass(raw("bypass") > 0.5f);
         last_ = s;
@@ -414,6 +422,12 @@ public:
     {
         intro_.setText(T("AdvancedIntro"), juce::dontSendNotification);
         addAndMakeVisible(intro_);
+        drLabel_.setText(T("StageDereverb"), juce::dontSendNotification);
+        addAndMakeVisible(drLabel_);
+        // items crees avant l'attachment (ComboBox ignore un texte vide)
+        dr_.addItemList({T("DereverbAuto"), T("DereverbOff"), T("DereverbLight"), T("DereverbMedium"), T("DereverbStrong")}, 1);
+        drAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(st, "dereverb_mode", dr_);
+        addAndMakeVisible(dr_);
         for (int i = 0; i < (int)std::size(kStages); ++i) {
             boxes_[i].setButtonText(T(kStages[i].label));
             att_[i] = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(st, kStages[i].id, boxes_[i]);
@@ -429,12 +443,17 @@ public:
         auto r = getLocalBounds().reduced(12);
         close_.setBounds(r.removeFromBottom(32).removeFromRight(140));
         intro_.setBounds(r.removeFromTop(48));
+        auto row = r.removeFromTop(30).reduced(0, 2);
+        drLabel_.setBounds(row.removeFromLeft(200));
+        dr_.setBounds(row);
         for (auto& b : boxes_)
             b.setBounds(r.removeFromTop(30));
     }
 
 private:
-    juce::Label intro_;
+    juce::Label intro_, drLabel_;
+    juce::ComboBox dr_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> drAtt_;
     juce::ToggleButton boxes_[std::size(kStages)];
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> att_[std::size(kStages)];
     juce::TextButton close_;
