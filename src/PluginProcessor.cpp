@@ -268,10 +268,11 @@ private:
         }
         if (force || s.gain != last_.gain)
             chain_.setGainDb(s.gain);
-        if (force || s.engine != last_.engine) {
+        if (force || s.engine != last_.engine)
             chain_.setEngine(s.engine == 1 && chain_.maxAvailable() ? VoiceChain::Max : VoiceChain::Fast);
-            setLatencySamples(chain_.latencySamples()); // latence fixe par moteur, compensee par l'hote
-        }
+        // latence = moteur + de-reverb s'il tourne ; compensee par l'hote, signalee seulement si elle change
+        if (chain_.latencySamples() != getLatencySamples())
+            setLatencySamples(chain_.latencySamples());
         chain_.setDenoise(raw("denoise") > 0.5f);
         chain_.setBypass(raw("bypass") > 0.5f);
         last_ = s;
