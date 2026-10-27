@@ -59,7 +59,7 @@ jobs:
           B=$(find build -type d -name "Gragarda Voice.vst3" -path "*VST3*" | head -1)
           S=$(find build -type d -name Standalone -path "*artefacts*" | head -1)
           mkdir pkg && cp -R "$B" pkg/ && cp -R "$S" "pkg/Gragarda Voice Standalone"
-          cd pkg && cmake -E tar cf ../gragarda-voice-vst-${{ matrix.name }}.zip --format=zip             "Gragarda Voice.vst3" "Gragarda Voice Standalone"
+          cd pkg && cmake -E tar cf ../gragarda-voice-vst-${{ matrix.name }}.zip --format=zip "Gragarda Voice.vst3" "Gragarda Voice Standalone"
 
       - name: Installateur Windows
         if: runner.os == 'Windows'
