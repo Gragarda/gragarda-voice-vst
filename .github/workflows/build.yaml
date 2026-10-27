@@ -73,4 +73,4 @@ jobs:
           name: gragarda-voice-vst-${{ matrix.name }}
           path: |
             gragarda-voice-vst-${{ matrix.name }}.zip
-            gragarda-voice-setup-*.exe
+            gragarda-voice-standalone.exe
