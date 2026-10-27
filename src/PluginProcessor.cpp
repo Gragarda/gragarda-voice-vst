@@ -144,10 +144,12 @@ public:
 
     void prepareToPlay(double sampleRate, int) override
     {
-        // Modele dans <bundle>.vst3/Contents/Resources ; le binaire est dans Contents/<arch> (MacOS sur macOS)
-        const auto model = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
-                               .getParentDirectory().getParentDirectory()
-                               .getChildFile("Resources/DeepFilterNet3_onnx.tar.gz");
+        // Modele dans <bundle>/Contents/Resources (binaire dans Contents/<arch>, MacOS sur macOS),
+        // ou Resources/ a cote de l'exe (Standalone Windows/Linux)
+        const auto bin = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+        auto model = bin.getParentDirectory().getChildFile("Resources/DeepFilterNet3_onnx.tar.gz");
+        if (!model.existsAsFile())
+            model = bin.getChildFile("Resources/DeepFilterNet3_onnx.tar.gz");
         // ponytail: RNNoise et DeepFilterNet sont entraines a 48 kHz ; a 44,1 kHz ils tournent quand meme
         // (debruitage moins bon). Reechantillonner autour du debruiteur si les retours le demandent.
         chain_.prepare(sampleRate, getTotalNumOutputChannels(),
@@ -459,6 +461,29 @@ private:
     juce::TextButton close_;
 };
 
+#if JucePlugin_Build_Standalone
+ #include <juce_audio_utils/juce_audio_utils.h>
+ #include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>
+// Standalone, une seule fois : sortie sur le cable virtuel (VB-Cable) s'il est installe, pour servir de micro
+// a Discord/OBS. Le son ne part pas vers les haut-parleurs : l'entree n'a plus a etre coupee (anti-larsen JUCE)
+static void routeToVirtualCable()
+{
+    auto* h = juce::StandalonePluginHolder::getInstance();
+    if (h == nullptr || h->settings.get() == nullptr || h->settings->getBoolValue("cableChecked")) return;
+    h->settings->setValue("cableChecked", true);
+    auto& dm = h->deviceManager;
+    if (auto* type = dm.getCurrentDeviceTypeObject())
+        for (const auto& name : type->getDeviceNames(false))
+            if (name.startsWith("CABLE Input")) {
+                auto setup = dm.getAudioDeviceSetup();
+                setup.outputDeviceName = name;
+                if (dm.setAudioDeviceSetup(setup, true).isEmpty())
+                    h->getMuteInputValue() = false;
+                return;
+            }
+}
+#endif
+
 class GragardaVoiceEditor : public juce::AudioProcessorEditor, private juce::Timer {
 public:
     explicit GragardaVoiceEditor(GragardaVoiceProcessor& p)
@@ -516,6 +541,10 @@ public:
         addAndMakeVisible(kofi_);
         setResizable(true, false);
         setSize(640, 40 + kRows * kRowH + 12 + 32);
+       #if JucePlugin_Build_Standalone
+        if (p.wrapperType == juce::AudioProcessor::wrapperType_Standalone)
+            routeToVirtualCable();
+       #endif
         startTimerHz(4);
         timerCallback();
     }

@@ -24,7 +24,7 @@ juce_add_plugin(GragardaVoice
   PLUGIN_MANUFACTURER_CODE Grgd
   PLUGIN_CODE GrVo
   PRODUCT_NAME "Gragarda Voice"
-  FORMATS VST3
+  FORMATS VST3 Standalone
   VST3_CATEGORIES Fx Dynamics
   IS_SYNTH FALSE
   NEEDS_MIDI_INPUT FALSE)
@@ -49,7 +49,20 @@ add_custom_command(TARGET GragardaVoice_VST3 POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy "${DFN_MODEL}" "${VST3_BUNDLE}/Contents/Resources/"
   COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/LICENSE" "${VST3_BUNDLE}/Contents/Resources/gragarda-voice-GPL-2.0.txt"
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/core/licenses" "${VST3_BUNDLE}/Contents/Resources/licenses")
+# Standalone : memes ressources, dans Contents/Resources de l'app (macOS) ou Resources/ a cote de l'exe
+set(SA_APP "$<GENEX_EVAL:$<TARGET_PROPERTY:GragardaVoice_Standalone,JUCE_PLUGIN_ARTEFACT_FILE>>")
+if(APPLE)
+  set(SA_RES "${SA_APP}/Contents/Resources")
+else()
+  set(SA_RES "$<TARGET_FILE_DIR:GragardaVoice_Standalone>/Resources")
+endif()
+add_custom_command(TARGET GragardaVoice_Standalone POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${SA_RES}"
+  COMMAND ${CMAKE_COMMAND} -E copy "${DFN_MODEL}" "${SA_RES}/"
+  COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/LICENSE" "${SA_RES}/gragarda-voice-GPL-2.0.txt"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/core/licenses" "${SA_RES}/licenses")
 if(APPLE)
   # ressources ajoutees apres la signature ad hoc de JUCE : re-signer
   add_custom_command(TARGET GragardaVoice_VST3 POST_BUILD COMMAND codesign --force --deep --sign - "${VST3_BUNDLE}")
+  add_custom_command(TARGET GragardaVoice_Standalone POST_BUILD COMMAND codesign --force --deep --sign - "${SA_APP}")
 endif()
