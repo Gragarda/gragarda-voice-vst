@@ -65,7 +65,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          V=$(sed -n 's/^project(.* VERSION \([0-9.]*\).*//p' CMakeLists.txt)
+          V=$(awk '/^project\(/ { for (i = 1; i < NF; i++) if ($i == "VERSION") print $(i + 1) }' CMakeLists.txt)
           "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" //DAppVersion=$V installer/gragarda-voice.iss
 
       - uses: actions/upload-artifact@v4
