@@ -57,10 +57,20 @@ jobs:
         shell: bash
         run: |
           B=$(find build -type d -name "Gragarda Voice.vst3" -path "*VST3*" | head -1)
-          mkdir pkg && cp -R "$B" pkg/
-          cd pkg && cmake -E tar cf ../gragarda-voice-vst-${{ matrix.name }}.zip --format=zip "Gragarda Voice.vst3"
+          S=$(find build -type d -name Standalone -path "*artefacts*" | head -1)
+          mkdir pkg && cp -R "$B" pkg/ && cp -R "$S" "pkg/Gragarda Voice Standalone"
+          cd pkg && cmake -E tar cf ../gragarda-voice-vst-${{ matrix.name }}.zip --format=zip "Gragarda Voice.vst3" "Gragarda Voice Standalone"
+
+      - name: Installateur Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          V=$(awk '/^project\(/ { for (i = 1; i < NF; i++) if ($i == "VERSION") print $(i + 1) }' CMakeLists.txt)
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" //DAppVersion=$V installer/gragarda-voice.iss
 
       - uses: actions/upload-artifact@v4
         with:
           name: gragarda-voice-vst-${{ matrix.name }}
-          path: gragarda-voice-vst-${{ matrix.name }}.zip
+          path: |
+            gragarda-voice-vst-${{ matrix.name }}.zip
+            gragarda-voice-setup-*.exe
