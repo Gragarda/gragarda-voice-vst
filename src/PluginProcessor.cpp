@@ -38,6 +38,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout layout()
     // De-reverb : Auto = RT60 pose par la calibration, sinon force a la main (kModeRt60)
     l.add(std::make_unique<AudioParameterChoice>(ParameterID{"dereverb_mode", 1}, "De-reverb",
         StringArray{"Auto (calibration)", "Off", "Light", "Medium", "Strong"}, 0));
+    // Beaucoup de micros USB / d'interfaces n'envoient le micro que sur un canal : recopie en mono
+    l.add(std::make_unique<AudioParameterChoice>(ParameterID{"input_ch", 1}, "Input channels",
+        StringArray{"Stereo", "Mono (left)", "Mono (right)", "Mono (left + right)"}, 0));
     return l;
 }
 
@@ -164,6 +167,7 @@ public:
     {
         juce::ScopedNoDenormals noDenormals;
         syncParams(false);
+        toMono(buffer, (int)raw("input_ch"));
         capture.push(buffer.getArrayOfReadPointers(), buffer.getNumChannels(), (size_t)buffer.getNumSamples());
         chain_.process(buffer.getArrayOfWritePointers(), buffer.getNumChannels(), (size_t)buffer.getNumSamples());
     }
@@ -231,6 +235,21 @@ private:
         }
     } last_;
 
+    static void toMono(juce::AudioBuffer<float>& b, int mode)
+    {
+        if (mode == 0 || b.getNumChannels() < 2)
+            return;
+        auto* l = b.getWritePointer(0);
+        auto* r = b.getWritePointer(1);
+        const int n = b.getNumSamples();
+        if (mode == 1)
+            std::copy(l, l + n, r);
+        else if (mode == 2)
+            std::copy(r, r + n, l);
+        else
+            for (int i = 0; i < n; ++i)
+                l[i] = r[i] = 0.5f * (l[i] + r[i]);
+    }
     float raw(const char* id) const { return state.getRawParameterValue(id)->load(); }
 
     // Parametres -> chaine. setMacros seulement si un macro change (recalcul des filtres)
@@ -430,6 +449,11 @@ public:
         dr_.addItemList({T("DereverbAuto"), T("DereverbOff"), T("DereverbLight"), T("DereverbMedium"), T("DereverbStrong")}, 1);
         drAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(st, "dereverb_mode", dr_);
         addAndMakeVisible(dr_);
+        inLabel_.setText(T("InputChannels"), juce::dontSendNotification);
+        addAndMakeVisible(inLabel_);
+        in_.addItemList({T("InputStereo"), T("InputLeft"), T("InputRight"), T("InputBoth")}, 1);
+        inAtt_ = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(st, "input_ch", in_);
+        addAndMakeVisible(in_);
         for (int i = 0; i < (int)std::size(kStages); ++i) {
             boxes_[i].setButtonText(T(kStages[i].label));
             att_[i] = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(st, kStages[i].id, boxes_[i]);
@@ -444,18 +468,21 @@ public:
     {
         auto r = getLocalBounds().reduced(12);
         close_.setBounds(r.removeFromBottom(32).removeFromRight(140));
-        intro_.setBounds(r.removeFromTop(48));
+        intro_.setBounds(r.removeFromTop(40));
         auto row = r.removeFromTop(30).reduced(0, 2);
+        inLabel_.setBounds(row.removeFromLeft(200));
+        in_.setBounds(row);
+        row = r.removeFromTop(30).reduced(0, 2);
         drLabel_.setBounds(row.removeFromLeft(200));
         dr_.setBounds(row);
         for (auto& b : boxes_)
-            b.setBounds(r.removeFromTop(30));
+            b.setBounds(r.removeFromTop(26));
     }
 
 private:
-    juce::Label intro_, drLabel_;
-    juce::ComboBox dr_;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> drAtt_;
+    juce::Label intro_, drLabel_, inLabel_;
+    juce::ComboBox dr_, in_;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> drAtt_, inAtt_;
     juce::ToggleButton boxes_[std::size(kStages)];
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> att_[std::size(kStages)];
     juce::TextButton close_;
