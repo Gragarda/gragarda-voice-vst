@@ -22,7 +22,7 @@ Then rescan plugins in your host.
 
 ### Standalone app (no DAW needed, Windows)
 
-Run `gragarda-voice-setup-x.y.z.exe`: it installs the standalone app and the VST3. The "Install VB-Cable" option
+Run `gragarda-voice-standalone.exe`: it installs the standalone app and the VST3. The "Install VB-Cable" option
 (checked by default) downloads the free [VB-Cable](https://vb-audio.com/Cable/) from VB-Audio and runs its setup.
 On first launch the app sends its output to "CABLE Input": pick "CABLE Output" as the microphone in Discord, OBS,
 Teams, etc. The zip also holds the standalone app (`Gragarda Voice Standalone`, keep `Resources` next to the exe).
