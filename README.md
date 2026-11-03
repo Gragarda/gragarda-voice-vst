@@ -1,5 +1,7 @@
 # Gragarda Voice VST3
 
+**Gragarda Voice:** [OBS filter](https://github.com/Gragarda/gragarda-voice) · **VST3 / standalone** · [Web app](https://github.com/Gragarda/gragarda-voice-web) · [DSP core](https://github.com/Gragarda/gragarda-voice-core)
+
 [![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/gragarda)
 
 The [Gragarda Voice](https://github.com/Gragarda/gragarda-voice) voice chain as a VST3 plugin, for hosts other than OBS:
