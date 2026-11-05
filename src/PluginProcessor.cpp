@@ -511,6 +511,45 @@ static void routeToVirtualCable()
 }
 #endif
 
+// Aide : etapes de mise en route (standalone ou plugin) ; en standalone, acces direct aux reglages audio
+class HelpPanel : public juce::Component {
+public:
+    HelpPanel(bool standalone, const Strings& T, std::function<void()> onClose)
+    {
+        text_.setMultiLine(true);
+        text_.setReadOnly(true);
+        text_.setCaretVisible(false);
+        text_.setText(T(standalone ? "HelpStandalone" : "HelpPlugin"));
+        addAndMakeVisible(text_);
+       #if JucePlugin_Build_Standalone
+        if (standalone) {
+            audio_.setButtonText(T("HelpAudioSettings"));
+            audio_.onClick = [] {
+                if (auto* h = juce::StandalonePluginHolder::getInstance())
+                    h->showAudioSettingsDialog();
+            };
+            addAndMakeVisible(audio_);
+        }
+       #endif
+        close_.setButtonText(T("AdvancedClose"));
+        close_.onClick = std::move(onClose);
+        addAndMakeVisible(close_);
+    }
+    void paint(juce::Graphics& g) override { g.fillAll(getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId)); }
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced(12);
+        auto bottom = r.removeFromBottom(32);
+        close_.setBounds(bottom.removeFromRight(140));
+        audio_.setBounds(bottom.removeFromLeft(260));
+        text_.setBounds(r.withTrimmedBottom(8));
+    }
+
+private:
+    juce::TextEditor text_;
+    juce::TextButton audio_, close_;
+};
+
 class GragardaVoiceEditor : public juce::AudioProcessorEditor, private juce::Timer {
 public:
     explicit GragardaVoiceEditor(GragardaVoiceProcessor& p)
@@ -559,6 +598,8 @@ public:
         }
         calibrate_.onClick = [this] { openCalibration(); };
         advanced_.onClick = [this] { openAdvanced(); };
+        help_.onClick = [this] { openHelp(); };
+        addAndMakeVisible(help_);
         addAndMakeVisible(advanced_);
         kofi_.setURL(juce::URL("https://ko-fi.com/gragarda"));
         retranslate();
@@ -589,6 +630,7 @@ public:
         latency_.setBounds(top);
         auto bottom = r.removeFromBottom(32);
         advanced_.setBounds(bottom.removeFromRight(220).reduced(6, 3));
+        help_.setBounds(bottom.removeFromRight(120).reduced(6, 3));
         kofi_.setBounds(bottom);
         r.reduce(12, 6);
         for (int i = 0; i < kRows; ++i) {
@@ -598,6 +640,8 @@ public:
         }
         if (panel_)
             panel_->setBounds(getLocalBounds());
+        if (helpPanel_)
+            helpPanel_->setBounds(getLocalBounds());
         if (advancedPanel_)
             advancedPanel_->setBounds(getLocalBounds());
     }
@@ -628,6 +672,8 @@ private:
     std::unique_ptr<CalibrationPanel> panel_;
     juce::TextButton advanced_;
     std::unique_ptr<AdvancedPanel> advancedPanel_;
+    juce::TextButton help_;
+    std::unique_ptr<HelpPanel> helpPanel_;
 
     std::array<juce::Component*, kRows> rows()
     {
@@ -649,6 +695,7 @@ private:
         engine_.changeItemText(2, T("EngineMax"));
         calibrate_.setButtonText(T("Calibrate"));
         advanced_.setButtonText(T("Advanced"));
+        help_.setButtonText(T("Help"));
         kofi_.setButtonText(T("SupportKofi"));
         timerCallback();
     }
@@ -669,6 +716,19 @@ private:
             });
         });
         addAndMakeVisible(*advancedPanel_);
+        resized();
+    }
+
+    void openHelp()
+    {
+        juce::Component::SafePointer<GragardaVoiceEditor> self(this);
+        helpPanel_ = std::make_unique<HelpPanel>(p_.wrapperType == juce::AudioProcessor::wrapperType_Standalone, T, [self] {
+            juce::MessageManager::callAsync([self] {
+                if (self)
+                    self->helpPanel_.reset();
+            });
+        });
+        addAndMakeVisible(*helpPanel_);
         resized();
     }
 
