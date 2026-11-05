@@ -17,7 +17,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 LicenseFile=..\LICENSE
 OutputDir=..
-OutputBaseFilename=gragarda-voice-setup-{#AppVersion}
+OutputBaseFilename=gragarda-voice-standalone
 WizardStyle=modern
 
 [Languages]
